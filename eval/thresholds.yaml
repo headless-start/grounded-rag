@@ -1,0 +1,18 @@
+# CI quality gate. Each value is the MINIMUM a run must reach; if any computed
+# metric falls below its floor, run_eval.py exits non-zero and the CI job fails.
+# These are target floors, not measured scores. Do not edit them to make a
+# failing run pass -- fix the regression instead.
+
+# ragas faithfulness: fraction of answer claims that are supported by the
+# retrieved context. The headline anti-hallucination metric.
+faithfulness: 0.85
+
+# ragas answer relevancy: how well the answer actually addresses the question.
+answer_relevancy: 0.80
+
+# ragas context precision: whether the relevant context ranks ahead of noise.
+context_precision: 0.80
+
+# retrieval hit-rate@k: fraction of non-refusal questions for which at least one
+# retrieved context comes from the expected source document. No LLM required.
+hit_rate_at_k: 0.85

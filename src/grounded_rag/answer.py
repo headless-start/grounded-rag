@@ -1,9 +1,14 @@
 """Answer assembly + citation enforcement + refusal.
 
-Flow: retrieve contexts -> if too few, refuse before calling the LLM -> assemble a
-prompt that demands inline citations -> generate -> verify every cited label maps to a
-chunk we actually retrieved. A claim that cites nothing real is not grounded, so we
-refuse rather than surface a hallucination.
+Flow: retrieve contexts -> if too few, refuse before calling the LLM -> assemble a prompt
+whose context blocks are numbered ``[1] [2] ...`` -> generate -> resolve the bracketed
+indices the model cited back to the chunks they point at. A claim that grounds in nothing
+real is refused rather than surfaced as a hallucination.
+
+Citing by index (the model only has to copy a digit) is far more reliable than asking a
+small model to reproduce a full ``[file pX ¶Y]`` label verbatim — with coarse chunks the
+model tends to invent a sub-paragraph number, which enforcement then rejects. We resolve
+the indices ourselves and rewrite them into the human ``[file pX ¶Y]`` form in the answer.
 """
 
 from __future__ import annotations
@@ -21,24 +26,24 @@ log = get_logger(__name__)
 
 REFUSAL_TEXT = "insufficient evidence in the provided documents"
 
-# matches inline citation labels like [handbook.pdf p4 ¶2]
-_CITATION_RE = re.compile(r"\[[^\[\]]+?\sp\d+\s¶\d+\]")
+# matches numeric context citations the model emits, e.g. [1] or [1, 3] or [2][4]
+_INDEX_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
 
 def _format_context(contexts: list[RetrievedChunk]) -> str:
-    blocks = []
-    for rc in contexts:
-        label = rc.chunk.citation_label()
-        blocks.append(f"{label}\n{rc.chunk.text}")
-    return "\n\n".join(blocks)
+    # Number each block; the model cites these numbers, we map them back to chunks.
+    return "\n\n".join(f"[{i}] {rc.chunk.text}" for i, rc in enumerate(contexts, start=1))
 
 
-def _split_citation(label: str) -> tuple[str, int, int] | None:
-    # '[name p4 ¶2]' -> (name, 4, 2)
-    m = re.match(r"\[(.+)\sp(\d+)\s¶(\d+)\]$", label)
-    if not m:
-        return None
-    return m.group(1), int(m.group(2)), int(m.group(3))
+def _cited_indices(text: str) -> list[int]:
+    """Distinct 1-based indices cited in the answer, in first-seen order."""
+    out: list[int] = []
+    for group in _INDEX_RE.findall(text):
+        for part in group.split(","):
+            n = int(part.strip())
+            if n not in out:
+                out.append(n)
+    return out
 
 
 class AnswerService:
@@ -68,34 +73,53 @@ class AnswerService:
             log.info("model_refused", question=question)
             return Answer(answer=REFUSAL_TEXT, refused=True, citations=[], contexts=contexts)
 
-        citations = self._verify_citations(raw, contexts)
+        text, citations = self._resolve_citations(raw, contexts)
 
         # Post-generation enforcement: an answer that grounds in nothing real is a refusal.
         if not citations:
             log.warning("ungrounded_answer_refused", question=question, raw=raw[:200])
             return Answer(answer=REFUSAL_TEXT, refused=True, citations=[], contexts=contexts)
 
-        return Answer(answer=raw, refused=False, citations=citations, contexts=contexts)
+        return Answer(answer=text, refused=False, citations=citations, contexts=contexts)
 
-    def _verify_citations(self, text: str, contexts: list[RetrievedChunk]) -> list[Citation]:
-        """Keep only citations whose label matches a chunk that was actually retrieved."""
-        by_label = {rc.chunk.citation_label(): rc.chunk for rc in contexts}
+    def _resolve_citations(
+        self, text: str, contexts: list[RetrievedChunk]
+    ) -> tuple[str, list[Citation]]:
+        """Map the model's numeric citations to real chunks and rewrite them as labels.
+
+        Returns the answer text with every valid ``[n]`` replaced by the chunk's human
+        ``[file pX ¶Y]`` label (invalid indices are dropped), plus the deduped citation
+        list. An index outside ``1..len(contexts)`` cannot be grounded, so it is discarded.
+        """
+        citations: list[Citation] = []
         seen: set[str] = set()
-        out: list[Citation] = []
-        for label in _CITATION_RE.findall(text):
-            if label in by_label and label not in seen:
-                seen.add(label)
-                c = by_label[label]
-                out.append(
-                    Citation(
-                        chunk_id=c.chunk_id,
-                        label=label,
-                        source_path=c.source_path,
-                        page=c.page,
-                        paragraph_idx=c.paragraph_idx,
+
+        def replace(match: re.Match[str]) -> str:
+            labels: list[str] = []
+            for part in match.group(1).split(","):
+                n = int(part.strip())
+                if not (1 <= n <= len(contexts)):
+                    continue  # fabricated index -> not grounded, drop it
+                chunk = contexts[n - 1].chunk
+                label = chunk.citation_label()
+                labels.append(label)
+                if chunk.chunk_id not in seen:
+                    seen.add(chunk.chunk_id)
+                    citations.append(
+                        Citation(
+                            chunk_id=chunk.chunk_id,
+                            label=label,
+                            source_path=chunk.source_path,
+                            page=chunk.page,
+                            paragraph_idx=chunk.paragraph_idx,
+                        )
                     )
-                )
-        return out
+            return " ".join(labels)
+
+        rewritten = _INDEX_RE.sub(replace, text)
+        # collapse any double spaces left where an invalid index was dropped
+        rewritten = re.sub(r" {2,}", " ", rewritten).strip()
+        return rewritten, citations
 
 
 def get_answer_service() -> AnswerService:

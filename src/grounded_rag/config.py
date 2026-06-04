@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     rerank_model: str = Field(default="cross-encoder/ms-marco-MiniLM-L-6-v2")
 
     # --- prompts (versioned; changing a prompt is a reviewable diff, not a buried string) ---
-    answer_prompt_version: str = Field(default="answer_v1")
+    answer_prompt_version: str = Field(default="answer_v3")
 
     # --- chunking ---
     chunk_max_tokens: int = Field(default=700)  # within the 500-800 band

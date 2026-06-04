@@ -37,22 +37,24 @@ def _service(contexts, reply):
     svc._llm = FakeLLM(reply)
     from grounded_rag.prompts import load_prompt
 
-    svc._template = load_prompt("answer_v1")
+    svc._template = load_prompt("answer_v3")
     return svc
 
 
-def test_grounded_answer_keeps_valid_citation():
+def test_grounded_answer_resolves_index_to_label():
     contexts = _ctx()
-    label = contexts[0].chunk.citation_label()
-    svc = _service(contexts, f"Employees accrue 1.67 days per month {label}.")
+    svc = _service(contexts, "Employees accrue 1.67 days per month [1].")
     ans = svc.ask("how much PTO?")
     assert not ans.refused
     assert len(ans.citations) == 1
     assert ans.citations[0].chunk_id == "abc123"
+    # the numeric [1] is rewritten into the human citation label
+    assert contexts[0].chunk.citation_label() in ans.answer
+    assert "[1]" not in ans.answer
 
 
 def test_ungrounded_answer_is_refused():
-    # model answers but cites no real label -> not grounded -> refuse
+    # model answers but cites no source -> not grounded -> refuse
     svc = _service(_ctx(), "Employees accrue 1.67 days per month.")
     ans = svc.ask("how much PTO?")
     assert ans.refused
@@ -71,8 +73,8 @@ def test_explicit_model_refusal():
     assert ans.refused
 
 
-def test_fabricated_citation_is_dropped():
-    # model cites a label that was never retrieved -> dropped -> refusal
-    svc = _service(_ctx(), "Made up fact [ghost.pdf p9 ¶9].")
+def test_out_of_range_index_is_dropped():
+    # only one context exists; citing [9] is fabricated -> dropped -> refusal
+    svc = _service(_ctx(), "Made up fact [9].")
     ans = svc.ask("q")
     assert ans.refused

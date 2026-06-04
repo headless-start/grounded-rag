@@ -1,0 +1,43 @@
+# version control
+.git
+.gitignore
+
+# python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# tool caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.cache/
+
+# local stores & model cache
+.chroma/
+data/index/
+*.bm25.pkl
+
+# env / secrets
+.env
+.env.*
+
+# tests and eval are not needed in the runtime image
+tests/
+eval/
+
+# docs / ci / build artifacts
+.github/
+Dockerfile
+docker-compose.yml
+.dockerignore
+*.md
+!README.md
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/

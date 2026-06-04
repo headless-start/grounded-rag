@@ -1,0 +1,33 @@
+services:
+  rag:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: grounded-rag:latest
+    ports:
+      - "8000:8000"
+    # Configuration is read from .env (GR_* prefix). Copy .env.example to .env.
+    env_file:
+      - .env
+    environment:
+      # Persist the HuggingFace model cache inside the named volume below.
+      HF_HOME: /home/app/.cache/huggingface
+      # Keep the vector store inside the persistent volume regardless of the
+      # value in .env so it survives container restarts.
+      GR_CHROMA_DIR: /data/chroma
+    volumes:
+      # Vector store: keeps the Chroma index across restarts.
+      - chroma:/data/chroma
+      # Embedding / rerank model cache: avoids re-downloading on every restart.
+      - hf-cache:/home/app/.cache/huggingface
+    # If GR_OPENAI_BASE_URL points at an LLM server running on the host (e.g.
+    # Project 2 on http://localhost:8001/v1), reach it from inside the
+    # container via http://host.docker.internal:8001/v1. On Docker Desktop
+    # this name resolves automatically; on Linux the mapping below adds it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  chroma:
+  hf-cache:

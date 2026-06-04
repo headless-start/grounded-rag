@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      # Available to the eval gate when configured in repo settings. Not
+      # required for lint/test; those steps run without it.
+      GR_OPENAI_API_KEY: ${{ secrets.GR_OPENAI_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --extra eval
+
+      - name: Lint (ruff check)
+        run: uv run ruff check src tests eval
+
+      - name: Format check (ruff format)
+        run: uv run ruff format --check src tests eval
+
+      - name: Type check (mypy)
+        run: uv run mypy src
+
+      - name: Tests
+        run: uv run pytest
+
+      - name: Eval gate
+        run: |
+          if [ -f eval/run_eval.py ]; then
+            uv run python eval/run_eval.py --slice 8
+          else
+            echo "eval harness not present yet, skipping"
+          fi

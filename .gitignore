@@ -1,0 +1,20 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# env / secrets
+.env
+
+# local stores & model cache
+.chroma/
+data/index/
+*.bm25.pkl
+.cache/
+
+# os
+.DS_Store

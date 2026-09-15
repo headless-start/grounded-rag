@@ -43,6 +43,11 @@ jobs:
       - name: Tests
         run: uv run pytest
 
+      # The eval gate retrieves from the vector store, so build it first.
+      # Without this step retrieval comes back empty and the gate always fails.
+      - name: Build the retrieval index
+        run: uv run python -m grounded_rag.ingest
+
       - name: Eval gate
         run: |
           if [ -f eval/run_eval.py ]; then
